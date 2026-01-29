@@ -1,0 +1,99 @@
+{
+  "name": "laravel-db-mcp",
+  "version": "1.0.0",
+  "description": "Laravel Database MCP Server - Read-only database access for AI agents",
+  "tools": [
+    {
+      "name": "db_schema_tables",
+      "description": "Get all tables in the database with their comments",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    {
+      "name": "db_schema_table_detail",
+      "description": "Get detailed schema information for a specific table including columns, indexes, and foreign keys",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "The name of the table to get details for"
+          }
+        },
+        "required": ["table"]
+      }
+    },
+    {
+      "name": "db_select_query",
+      "description": "Execute a structured SELECT query on a database table (read-only, no raw SQL allowed)",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "table": {
+            "type": "string",
+            "description": "The name of the table to query"
+          },
+          "select": {
+            "type": "array",
+            "description": "Array of column names to select",
+            "items": {
+              "type": "string"
+            },
+            "default": ["*"]
+          },
+          "where": {
+            "type": "array",
+            "description": "Array of WHERE conditions",
+            "items": {
+              "type": "array"
+            },
+            "default": []
+          },
+          "order_by": {
+            "type": "array",
+            "description": "Array of order by clauses",
+            "items": {
+              "type": "array"
+            },
+            "default": []
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of rows to return (max: 100)",
+            "default": 20,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Number of rows to skip",
+            "default": 0,
+            "minimum": 0
+          }
+        },
+        "required": ["table"]
+      }
+    }
+  ],
+  "restrictions": [
+    "select-only",
+    "no-write",
+    "no-raw-sql",
+    "no-ddl",
+    "no-dml",
+    "structured-queries-only",
+    "operator-whitelist",
+    "max-limit-100"
+  ],
+  "security": {
+    "allowed_operations": ["SELECT"],
+    "forbidden_operations": ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"],
+    "allowed_operators": ["=", "!=", ">", "<", ">=", "<=", "like", "in", "not in", "is null", "is not null"],
+    "max_limit": 100,
+    "validation": "QueryGuard"
+  }
+}
+
