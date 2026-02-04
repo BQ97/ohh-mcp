@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Database\DbConnectionResolver;
+use App\Mcp\Responses\ErrorResponse;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
@@ -40,51 +41,71 @@ class DbSchemaTables extends Tool
      */
     public function handle(Request $request): Response
     {
-        // 解析项目并获取数据库连接
-        $project = $request->string('project', '');
-        
-        // 如果 project 为空，返回友好的错误信息
-        if (empty($project)) {
-            $available = implode(', ', array_keys(config('mcp_projects', [])));
-            return Response::json([
-                'error' => 'Missing required parameter',
-                'message' => "The 'project' parameter is required. Available projects: {$available}",
-                'available_projects' => array_keys(config('mcp_projects', [])),
-                'example' => [
-                    'project' => 'housekeep'
-                ]
-            ]);
+        try {
+            // 解析项目并获取数据库连接
+            $project = $request->string('project', '');
+            
+            // 如果 project 为空，返回友好的错误信息
+            if (empty($project)) {
+                $availableProjects = DbConnectionResolver::getAvailableProjects();
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            $connectionName = DbConnectionResolver::resolve($project);
+            
+        } catch (\InvalidArgumentException $e) {
+            // 处理项目不存在的错误
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            
+            if (str_contains($e->getMessage(), 'project_missing')) {
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            if (str_contains($e->getMessage(), 'project_not_found')) {
+                $projectName = str_replace('project_not_found:', '', $e->getMessage());
+                return ErrorResponse::projectNotFound($projectName, $availableProjects);
+            }
+            
+            return ErrorResponse::generic($e->getMessage(), 'Error');
+        } catch (\Exception $e) {
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            return ErrorResponse::connectionFailed($request->string('project', 'unknown'), $e->getMessage());
         }
-        
-        $connectionName = DbConnectionResolver::resolve($project);
-        
-        $connection = DB::connection($connectionName);
-        $databaseName = $connection->getDatabaseName();
-        $driver = $connection->getDriverName();
 
-        // 获取所有表名（兼容不同数据库）
-        $tableNames = $this->getAllTableNames($connectionName, $driver, $databaseName);
+        try {
+            $connection = DB::connection($connectionName);
+            $databaseName = $connection->getDatabaseName();
+            $driver = $connection->getDriverName();
 
-        $tables = [];
-        foreach ($tableNames as $tableName) {
-            // 获取表注释
-            $comment = $this->getTableComment($connectionName, $tableName, $driver);
+            // 获取所有表名（兼容不同数据库）
+            $tableNames = $this->getAllTableNames($connectionName, $driver, $databaseName);
 
-            $tables[] = [
-                'name' => $tableName,
-                'comment' => $comment,
+            $tables = [];
+            foreach ($tableNames as $tableName) {
+                // 获取表注释
+                $comment = $this->getTableComment($connectionName, $tableName, $driver);
+
+                $tables[] = [
+                    'name' => $tableName,
+                    'comment' => $comment,
+                ];
+            }
+
+            $result = [
+                'project' => $project,
+                'database' => $databaseName,
+                'driver' => $driver,
+                'tables' => $tables,
+                'count' => count($tables),
             ];
+
+            return Response::json($result);
+        } catch (\Exception $e) {
+            return ErrorResponse::generic(
+                "Failed to retrieve tables for project '{$project}': " . $e->getMessage(),
+                'Database Error'
+            );
         }
-
-        $result = [
-            'project' => $project,
-            'database' => $databaseName,
-            'driver' => $driver,
-            'tables' => $tables,
-            'count' => count($tables),
-        ];
-
-        return Response::json($result);
     }
 
     /**

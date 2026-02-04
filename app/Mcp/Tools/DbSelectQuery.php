@@ -4,6 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Mcp\Database\DbConnectionResolver;
 use App\Mcp\Guards\QueryGuard;
+use App\Mcp\Responses\ErrorResponse;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
 use Laravel\Mcp\Request;
@@ -57,113 +58,147 @@ class DbSelectQuery extends Tool
      */
     public function handle(Request $request): Response
     {
-        // 解析项目并获取数据库连接
-        $project = $request->string('project', '');
-        
-        // 如果 project 为空，返回友好的错误信息
-        if (empty($project)) {
-            $available = implode(', ', array_keys(config('mcp_projects', [])));
-            return Response::json([
-                'error' => 'Missing required parameter',
-                'message' => "The 'project' parameter is required. Available projects: {$available}",
-                'available_projects' => array_keys(config('mcp_projects', [])),
-                'example' => [
-                    'project' => 'housekeep',
-                    'table' => 'users',
-                    'select' => ['id', 'name'],
-                    'limit' => 10
-                ]
-            ]);
+        try {
+            // 解析项目并获取数据库连接
+            $project = $request->string('project', '');
+            
+            // 如果 project 为空，返回友好的错误信息
+            if (empty($project)) {
+                $availableProjects = DbConnectionResolver::getAvailableProjects();
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            $connectionName = DbConnectionResolver::resolve($project);
+            
+        } catch (\InvalidArgumentException $e) {
+            // 处理项目不存在的错误
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            
+            if (str_contains($e->getMessage(), 'project_missing')) {
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            if (str_contains($e->getMessage(), 'project_not_found')) {
+                $projectName = str_replace('project_not_found:', '', $e->getMessage());
+                return ErrorResponse::projectNotFound($projectName, $availableProjects);
+            }
+            
+            return ErrorResponse::generic($e->getMessage(), 'Error');
+        } catch (\Exception $e) {
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            return ErrorResponse::connectionFailed($request->string('project', 'unknown'), $e->getMessage());
         }
-        
-        $connectionName = DbConnectionResolver::resolve($project);
-        
-        // 获取参数
-        $input = [
-            'table' => $request->string('table'),
-            'select' => $request->array('select', ['*']),
-            'where' => $request->array('where', []),
-            'order_by' => $request->array('order_by', []),
-            'limit' => $request->integer('limit', 20),
-            'offset' => $request->integer('offset', 0),
-        ];
 
-        // 安全验证
-        QueryGuard::validate($input, $connectionName);
+        try {
+            // 获取参数
+            $input = [
+                'table' => $request->string('table'),
+                'select' => $request->array('select', ['*']),
+                'where' => $request->array('where', []),
+                'order_by' => $request->array('order_by', []),
+                'limit' => $request->integer('limit', 20),
+                'offset' => $request->integer('offset', 0),
+            ];
 
-        // 构建查询
-        $query = DB::connection($connectionName)->table($input['table']);
+            // 安全验证
+            $validationError = QueryGuard::validate($input, $connectionName);
+            if ($validationError) {
+                // 检查验证错误的类型
+                if ($validationError['type'] === 'table_not_found') {
+                    return ErrorResponse::tableNotFound($input['table'], $project);
+                }
+                if ($validationError['type'] === 'column_not_found') {
+                    return ErrorResponse::columnNotFound($validationError['column'], $input['table'], $project);
+                }
+                if ($validationError['type'] === 'invalid_operator') {
+                    return ErrorResponse::invalidOperator($validationError['operator']);
+                }
+                if ($validationError['type'] === 'limit_exceeded') {
+                    return ErrorResponse::limitExceeded($validationError['provided_limit'], $validationError['max_limit']);
+                }
+                // 其他验证错误
+                return Response::json($validationError);
+            }
 
-        // SELECT 字段
-        $select = $input['select'];
-        $query->select($select);
+            // 构建查询
+            $query = DB::connection($connectionName)->table($input['table']);
 
-        // WHERE 条件
-        if (!empty($input['where'])) {
-            foreach ($input['where'] as $condition) {
-                if (count($condition) === 2) {
-                    // [column, value] - 默认使用 = 操作符
-                    $query->where($condition[0], '=', $condition[1]);
-                } elseif (count($condition) === 3) {
-                    // [column, operator, value]
-                    $query->where($condition[0], $condition[1], $condition[2]);
+            // SELECT 字段
+            $select = $input['select'];
+            $query->select($select);
+
+            // WHERE 条件
+            if (!empty($input['where'])) {
+                foreach ($input['where'] as $condition) {
+                    if (count($condition) === 2) {
+                        // [column, value] - 默认使用 = 操作符
+                        $query->where($condition[0], '=', $condition[1]);
+                    } elseif (count($condition) === 3) {
+                        // [column, operator, value]
+                        $query->where($condition[0], $condition[1], $condition[2]);
+                    }
                 }
             }
-        }
 
-        // ORDER BY
-        if (!empty($input['order_by'])) {
-            foreach ($input['order_by'] as $order) {
-                if (count($order) === 2) {
-                    $column = $order[0];
-                    $direction = strtolower($order[1]) === 'desc' ? 'desc' : 'asc';
-                    $query->orderBy($column, $direction);
-                } elseif (count($order) === 1) {
-                    // 默认升序
-                    $query->orderBy($order[0], 'asc');
+            // ORDER BY
+            if (!empty($input['order_by'])) {
+                foreach ($input['order_by'] as $order) {
+                    if (count($order) === 2) {
+                        $column = $order[0];
+                        $direction = strtolower($order[1]) === 'desc' ? 'desc' : 'asc';
+                        $query->orderBy($column, $direction);
+                    } elseif (count($order) === 1) {
+                        // 默认升序
+                        $query->orderBy($order[0], 'asc');
+                    }
                 }
             }
-        }
 
-        // LIMIT 和 OFFSET
-        $limit = QueryGuard::getSafeLimit($input['limit']);
-        $offset = $input['offset'];
+            // LIMIT 和 OFFSET
+            $limit = QueryGuard::getSafeLimit($input['limit']);
+            $offset = $input['offset'];
 
-        $query->limit($limit);
-        if ($offset > 0) {
-            $query->offset($offset);
-        }
+            $query->limit($limit);
+            if ($offset > 0) {
+                $query->offset($offset);
+            }
 
-        // 执行查询
-        $rows = $query->get()->toArray();
+            // 执行查询
+            $rows = $query->get()->toArray();
 
-        // 获取总数（用于分页）
-        $totalQuery = DB::connection($connectionName)->table($input['table']);
-        if (!empty($input['where'])) {
-            foreach ($input['where'] as $condition) {
-                if (count($condition) === 2) {
-                    $totalQuery->where($condition[0], '=', $condition[1]);
-                } elseif (count($condition) === 3) {
-                    $totalQuery->where($condition[0], $condition[1], $condition[2]);
+            // 获取总数（用于分页）
+            $totalQuery = DB::connection($connectionName)->table($input['table']);
+            if (!empty($input['where'])) {
+                foreach ($input['where'] as $condition) {
+                    if (count($condition) === 2) {
+                        $totalQuery->where($condition[0], '=', $condition[1]);
+                    } elseif (count($condition) === 3) {
+                        $totalQuery->where($condition[0], $condition[1], $condition[2]);
+                    }
                 }
             }
+            $total = $totalQuery->count();
+
+            $result = [
+                'rows' => $rows,
+                'meta' => [
+                    'project' => $project,
+                    'table' => $input['table'],
+                    'count' => count($rows),
+                    'limit' => $limit,
+                    'offset' => $offset,
+                    'total' => $total,
+                    'has_more' => ($offset + count($rows)) < $total,
+                ],
+            ];
+
+            return Response::json($result);
+        } catch (\Exception $e) {
+            return ErrorResponse::generic(
+                "Failed to execute query on table '{$input['table']}': " . $e->getMessage(),
+                'Database Error'
+            );
         }
-        $total = $totalQuery->count();
-
-        $result = [
-            'rows' => $rows,
-            'meta' => [
-                'project' => $project,
-                'table' => $input['table'],
-                'count' => count($rows),
-                'limit' => $limit,
-                'offset' => $offset,
-                'total' => $total,
-                'has_more' => ($offset + count($rows)) < $total,
-            ],
-        ];
-
-        return Response::json($result);
     }
 }
 

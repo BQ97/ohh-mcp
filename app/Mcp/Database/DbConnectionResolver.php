@@ -3,7 +3,7 @@
 namespace App\Mcp\Database;
 
 use Illuminate\Support\Facades\DB;
-use RuntimeException;
+use InvalidArgumentException;
 
 class DbConnectionResolver
 {
@@ -17,25 +17,19 @@ class DbConnectionResolver
      *
      * @param string $project 项目标识符
      * @return string 数据库连接名称
-     * @throws RuntimeException 当项目不存在时
+     * @throws InvalidArgumentException 当项目不存在时
      */
     public static function resolve(string $project): string
     {
         // 验证 project 参数不为空
         if (empty($project)) {
-            $available = implode(', ', array_keys(config('mcp_projects', [])));
-            throw new RuntimeException(
-                "MCP project parameter is required. Available projects: {$available}"
-            );
+            throw new InvalidArgumentException('project_missing');
         }
 
         $config = config("mcp_projects.{$project}");
 
         if (!$config) {
-            $available = implode(', ', array_keys(config('mcp_projects', [])));
-            throw new RuntimeException(
-                "Unknown MCP project: '{$project}'. Available projects: {$available}"
-            );
+            throw new InvalidArgumentException("project_not_found:{$project}");
         }
 
         // 动态注入运行时连接配置
@@ -58,6 +52,16 @@ class DbConnectionResolver
     public static function getRuntimeConnectionName(): string
     {
         return self::RUNTIME_CONNECTION;
+    }
+
+    /**
+     * 获取所有可用项目列表
+     *
+     * @return array
+     */
+    public static function getAvailableProjects(): array
+    {
+        return array_keys(config('mcp_projects', []));
     }
 }
 

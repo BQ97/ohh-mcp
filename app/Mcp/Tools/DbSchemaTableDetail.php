@@ -4,6 +4,7 @@ namespace App\Mcp\Tools;
 
 use App\Mcp\Database\DbConnectionResolver;
 use App\Mcp\Guards\QueryGuard;
+use App\Mcp\Responses\ErrorResponse;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -45,42 +46,68 @@ class DbSchemaTableDetail extends Tool
      */
     public function handle(Request $request): Response
     {
-        // 解析项目并获取数据库连接
-        $project = $request->string('project', '');
-        
-        // 如果 project 为空，返回友好的错误信息
-        if (empty($project)) {
-            $available = implode(', ', array_keys(config('mcp_projects', [])));
-            return Response::json([
-                'error' => 'Missing required parameter',
-                'message' => "The 'project' parameter is required. Available projects: {$available}",
-                'available_projects' => array_keys(config('mcp_projects', [])),
-                'example' => [
-                    'project' => 'housekeep',
-                    'table' => 'users'
-                ]
-            ]);
+        try {
+            // 解析项目并获取数据库连接
+            $project = $request->string('project', '');
+            
+            // 如果 project 为空，返回友好的错误信息
+            if (empty($project)) {
+                $availableProjects = DbConnectionResolver::getAvailableProjects();
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            $connectionName = DbConnectionResolver::resolve($project);
+            
+        } catch (\InvalidArgumentException $e) {
+            // 处理项目不存在的错误
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            
+            if (str_contains($e->getMessage(), 'project_missing')) {
+                return ErrorResponse::missingProject($availableProjects);
+            }
+            
+            if (str_contains($e->getMessage(), 'project_not_found')) {
+                $projectName = str_replace('project_not_found:', '', $e->getMessage());
+                return ErrorResponse::projectNotFound($projectName, $availableProjects);
+            }
+            
+            return ErrorResponse::generic($e->getMessage(), 'Error');
+        } catch (\Exception $e) {
+            $availableProjects = DbConnectionResolver::getAvailableProjects();
+            return ErrorResponse::connectionFailed($request->string('project', 'unknown'), $e->getMessage());
         }
-        
-        $connectionName = DbConnectionResolver::resolve($project);
-        
-        $tableName = $request->string('table', '');
 
-        // 验证表是否存在
-        QueryGuard::validate(['table' => $tableName], $connectionName);
+        try {
+            $tableName = $request->string('table', '');
 
-        $connection = DB::connection($connectionName);
-        $driver = $connection->getDriverName();
+            // 验证表是否存在
+            $validationError = QueryGuard::validate(['table' => $tableName], $connectionName);
+            if ($validationError) {
+                // 检查是否是表不存在的错误
+                if ($validationError['type'] === 'table_not_found') {
+                    return ErrorResponse::tableNotFound($tableName, $project);
+                }
+                return Response::json($validationError);
+            }
 
-        $result = [
-            'project' => $project,
-            'table' => $tableName,
-            'columns' => $this->getColumns($connectionName, $tableName, $driver),
-            'indexes' => $this->getIndexes($connectionName, $tableName, $driver),
-            'foreign_keys' => $this->getForeignKeys($connectionName, $tableName, $driver),
-        ];
+            $connection = DB::connection($connectionName);
+            $driver = $connection->getDriverName();
 
-        return Response::json($result);
+            $result = [
+                'project' => $project,
+                'table' => $tableName,
+                'columns' => $this->getColumns($connectionName, $tableName, $driver),
+                'indexes' => $this->getIndexes($connectionName, $tableName, $driver),
+                'foreign_keys' => $this->getForeignKeys($connectionName, $tableName, $driver),
+            ];
+
+            return Response::json($result);
+        } catch (\Exception $e) {
+            return ErrorResponse::generic(
+                "Failed to retrieve table details for '{$tableName}': " . $e->getMessage(),
+                'Database Error'
+            );
+        }
     }
 
     /**
