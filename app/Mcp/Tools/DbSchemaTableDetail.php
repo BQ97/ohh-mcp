@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Mcp\Database\DbConnectionResolver;
 use App\Mcp\Guards\QueryGuard;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,14 @@ class DbSchemaTableDetail extends Tool
     /**
      * Tool 描述
      */
-    protected string $description = 'Get detailed schema information for a specific table including columns, indexes, and foreign keys';
+    protected string $description = <<<'MARKDOWN'
+        Get detailed schema information for a specific table including columns, indexes, and foreign keys.
+        
+        IMPORTANT: The 'project' parameter must be resolved from .ai/project.json in the business repository.
+        Never hardcode or guess project identifiers.
+        
+        Example: {"project": "housekeep", "table": "users"}
+    MARKDOWN;
 
     /**
      * 输入 Schema
@@ -23,6 +31,9 @@ class DbSchemaTableDetail extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
+            'project' => $schema->string()
+                ->description('Project identifier (housekeep, nyw, or esign). REQUIRED: Must be provided.')
+                ->required(),
             'table' => $schema->string()
                 ->description('The name of the table to get details for')
                 ->required(),
@@ -34,19 +45,39 @@ class DbSchemaTableDetail extends Tool
      */
     public function handle(Request $request): Response
     {
-        $tableName = $request->string('table');
+        // 解析项目并获取数据库连接
+        $project = $request->string('project', '');
+        
+        // 如果 project 为空，返回友好的错误信息
+        if (empty($project)) {
+            $available = implode(', ', array_keys(config('mcp_projects', [])));
+            return Response::json([
+                'error' => 'Missing required parameter',
+                'message' => "The 'project' parameter is required. Available projects: {$available}",
+                'available_projects' => array_keys(config('mcp_projects', [])),
+                'example' => [
+                    'project' => 'housekeep',
+                    'table' => 'users'
+                ]
+            ]);
+        }
+        
+        $connectionName = DbConnectionResolver::resolve($project);
+        
+        $tableName = $request->string('table', '');
 
         // 验证表是否存在
-        QueryGuard::validate(['table' => $tableName]);
+        QueryGuard::validate(['table' => $tableName], $connectionName);
 
-        $connection = DB::connection();
+        $connection = DB::connection($connectionName);
         $driver = $connection->getDriverName();
 
         $result = [
+            'project' => $project,
             'table' => $tableName,
-            'columns' => $this->getColumns($tableName, $driver),
-            'indexes' => $this->getIndexes($tableName, $driver),
-            'foreign_keys' => $this->getForeignKeys($tableName, $driver),
+            'columns' => $this->getColumns($connectionName, $tableName, $driver),
+            'indexes' => $this->getIndexes($connectionName, $tableName, $driver),
+            'foreign_keys' => $this->getForeignKeys($connectionName, $tableName, $driver),
         ];
 
         return Response::json($result);
@@ -55,12 +86,12 @@ class DbSchemaTableDetail extends Tool
     /**
      * 获取表的所有字段信息
      */
-    private function getColumns(string $tableName, string $driver): array
+    private function getColumns(string $connectionName, string $tableName, string $driver): array
     {
         $columns = [];
 
         if ($driver === 'mysql') {
-            $results = DB::select(
+            $results = DB::connection($connectionName)->select(
                 "SELECT 
                     COLUMN_NAME as name,
                     COLUMN_TYPE as type,
@@ -88,7 +119,7 @@ class DbSchemaTableDetail extends Tool
                 ];
             }
         } elseif ($driver === 'pgsql') {
-            $results = DB::select(
+            $results = DB::connection($connectionName)->select(
                 "SELECT 
                     column_name as name,
                     data_type as type,
@@ -112,7 +143,7 @@ class DbSchemaTableDetail extends Tool
                 ];
             }
         } elseif ($driver === 'sqlite') {
-            $results = DB::select("PRAGMA table_info({$tableName})");
+            $results = DB::connection($connectionName)->select("PRAGMA table_info({$tableName})");
 
             foreach ($results as $column) {
                 $columns[] = [
@@ -133,13 +164,13 @@ class DbSchemaTableDetail extends Tool
     /**
      * 获取表的索引信息
      */
-    private function getIndexes(string $tableName, string $driver): array
+    private function getIndexes(string $connectionName, string $tableName, string $driver): array
     {
         $indexes = [];
 
         try {
             if ($driver === 'mysql') {
-                $results = DB::select("SHOW INDEX FROM {$tableName}");
+                $results = DB::connection($connectionName)->select("SHOW INDEX FROM {$tableName}");
 
                 $indexGroups = [];
                 foreach ($results as $index) {
@@ -155,7 +186,7 @@ class DbSchemaTableDetail extends Tool
                     ];
                 }
             } elseif ($driver === 'pgsql') {
-                $results = DB::select(
+                $results = DB::connection($connectionName)->select(
                     "SELECT
                         i.relname as index_name,
                         a.attname as column_name,
@@ -183,10 +214,10 @@ class DbSchemaTableDetail extends Tool
                     ];
                 }
             } elseif ($driver === 'sqlite') {
-                $results = DB::select("PRAGMA index_list({$tableName})");
+                $results = DB::connection($connectionName)->select("PRAGMA index_list({$tableName})");
 
                 foreach ($results as $index) {
-                    $indexInfo = DB::select("PRAGMA index_info({$index->name})");
+                    $indexInfo = DB::connection($connectionName)->select("PRAGMA index_info({$index->name})");
                     $columns = array_map(fn($col) => $col->name, $indexInfo);
 
                     $indexes[] = [
@@ -207,13 +238,13 @@ class DbSchemaTableDetail extends Tool
     /**
      * 获取表的外键信息
      */
-    private function getForeignKeys(string $tableName, string $driver): array
+    private function getForeignKeys(string $connectionName, string $tableName, string $driver): array
     {
         $foreignKeys = [];
 
         try {
             if ($driver === 'mysql') {
-                $results = DB::select(
+                $results = DB::connection($connectionName)->select(
                     "SELECT
                         CONSTRAINT_NAME as name,
                         COLUMN_NAME as column,
@@ -235,7 +266,7 @@ class DbSchemaTableDetail extends Tool
                     ];
                 }
             } elseif ($driver === 'pgsql') {
-                $results = DB::select(
+                $results = DB::connection($connectionName)->select(
                     "SELECT
                         tc.constraint_name as name,
                         kcu.column_name as column,
@@ -260,7 +291,7 @@ class DbSchemaTableDetail extends Tool
                     ];
                 }
             } elseif ($driver === 'sqlite') {
-                $results = DB::select("PRAGMA foreign_key_list({$tableName})");
+                $results = DB::connection($connectionName)->select("PRAGMA foreign_key_list({$tableName})");
 
                 foreach ($results as $fk) {
                     $foreignKeys[] = [

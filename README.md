@@ -1,59 +1,254 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Laravel MCP Server (Project-Aware) 🚀
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+[![Laravel](https://img.shields.io/badge/Laravel-11.x-FF2D20?style=flat&logo=laravel)](https://laravel.com)
+[![MCP](https://img.shields.io/badge/MCP-2.0.0-blue?style=flat)](https://modelcontextprotocol.io)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat)](LICENSE)
 
-## About Laravel
+A **project-aware Model Context Protocol (MCP) server** built on Laravel that provides read-only database access with dynamic context switching. Perfect for AI assistants like Claude, Cursor, and GitHub Copilot.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## ✨ Features
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- 🔄 **Dynamic Database Switching** - Switch between multiple databases without restarting
+- 🔒 **Read-Only by Design** - Only SELECT operations allowed, no write access
+- 🎯 **Project-Aware** - Single server instance serves multiple projects/databases
+- 🛡️ **Security First** - Structured queries only, no raw SQL, operator whitelist
+- 🤖 **AI-Native** - Built specifically for AI assistant integration
+- ⚡ **Zero Downtime** - Add/switch projects without server restart
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## 🏗️ Architecture
 
-## Learning Laravel
+```
+┌─────────────────┐
+│   AI Assistant  │ (Claude, Cursor, Copilot)
+└────────┬────────┘
+         │ MCP Protocol
+         ▼
+┌─────────────────────────────────────┐
+│   Laravel MCP Server (v2.0.0)       │
+│   ┌─────────────────────────────┐   │
+│   │  DbConnectionResolver       │   │
+│   │  (Runtime Connection)       │   │
+│   └─────────────────────────────┘   │
+│            │                         │
+│   ┌────────┴────────┐               │
+│   │  Project Config │               │
+│   │  mcp_projects   │               │
+│   └────────┬────────┘               │
+└────────────┼─────────────────────────┘
+             │
+    ┌────────┴────────┐
+    ▼                 ▼
+┌─────────┐      ┌─────────┐
+│  DB #1  │      │  DB #2  │
+│ (MySQL) │      │ (SQLite)│
+└─────────┘      └─────────┘
+```
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework. You can also check out [Laravel Learn](https://laravel.com/learn), where you will be guided through building a modern Laravel application.
+## 🚀 Quick Start
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### Installation
 
-## Laravel Sponsors
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd ohh-mcp
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+# Install dependencies
+composer install
 
-### Premium Partners
+# Configure your first project
+cp .env.example .env
+php artisan key:generate
+```
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### Configuration
 
-## Contributing
+1. **Add project database configurations** in `config/mcp_projects.php`:
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+```php
+return [
+    'demo_project' => [
+        'driver' => 'sqlite',
+        'database' => database_path('database.sqlite'),
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+    ],
+    
+    'production_project' => [
+        'driver' => 'mysql',
+        'host' => '127.0.0.1',
+        'port' => 3306,
+        'database' => 'production_db',
+        'username' => 'mcp_reader',
+        'password' => 'readonly_password',
+        'charset' => 'utf8mb4',
+        'collation' => 'utf8mb4_unicode_ci',
+    ],
+];
+```
 
-## Code of Conduct
+2. **Set the active project** in `.ai/project.json`:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```json
+{
+  "mcp_project": "demo_project"
+}
+```
 
-## Security Vulnerabilities
+3. **Start the MCP server**:
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+```bash
+php artisan mcp:serve
+```
 
-## License
+## 📚 Available Tools
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+### 1. `db_schema_tables`
+List all database tables with their comments.
+
+```json
+{
+  "project": "demo_project"
+}
+```
+
+### 2. `db_schema_table_detail`
+Get detailed schema information for a specific table.
+
+```json
+{
+  "project": "demo_project",
+  "table": "users"
+}
+```
+
+### 3. `db_select_query`
+Execute structured SELECT queries.
+
+```json
+{
+  "project": "demo_project",
+  "table": "users",
+  "select": ["id", "name", "email"],
+  "where": [["status", "=", "active"]],
+  "limit": 10
+}
+```
+
+## 🔒 Security Features
+
+- ✅ **Read-Only Operations** - Only SELECT queries allowed
+- ✅ **No Raw SQL** - Structured queries only
+- ✅ **Operator Whitelist** - Only safe operators (`=`, `>`, `<`, `LIKE`, etc.)
+- ✅ **Table/Column Validation** - Automatic validation against schema
+- ✅ **Query Limits** - Maximum 100 rows per query
+- ✅ **Connection Isolation** - Each project uses separate connections
+
+## 🎯 Use Cases
+
+### Multi-Project Development
+```bash
+# Switch between projects without restart
+# Just update .ai/project.json
+```
+
+### Multi-Tenant SaaS
+```php
+// Each tenant gets their own project config
+'tenant_123' => [...],
+'tenant_456' => [...],
+```
+
+### Environment Separation
+```php
+'dev_project' => [...],
+'staging_project' => [...],
+'production_project' => [...],
+```
+
+## 🤖 AI Assistant Integration
+
+### For Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "laravel-db": {
+      "command": "php",
+      "args": ["artisan", "mcp:serve"],
+      "cwd": "/path/to/ohh-mcp"
+    }
+  }
+}
+```
+
+### For Cursor
+
+Add to your MCP settings:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "laravel-db": {
+        "command": "php artisan mcp:serve",
+        "cwd": "/path/to/ohh-mcp"
+      }
+    }
+  }
+}
+```
+
+## 📖 Documentation
+
+- [Upgrade Guide](UPGRADE_GUIDE.md) - Migration from v1.0.0 to v2.0.0
+- [AI Context Configuration](.ai/README.md) - How AI assistants should use this server
+- [Laravel MCP Documentation](https://laravel.com/docs/mcp) - Official Laravel MCP docs
+
+## 🛠️ Development
+
+### Running Tests
+
+```bash
+php artisan test
+```
+
+### Adding a New Tool
+
+1. Create tool class in `app/Mcp/Tools/`
+2. Extend `Laravel\Mcp\Server\Tool`
+3. Implement `schema()` and `handle()` methods
+4. Register in `app/Mcp/DatabaseServer.php`
+
+## 🔄 Version History
+
+### v2.0.0 (Current)
+- ✨ Project-aware architecture
+- ✨ Dynamic database switching
+- ✨ Runtime connection resolution
+- ✨ AI context configuration
+
+### v1.0.0
+- 🎉 Initial release
+- ✅ Basic read-only database access
+- ✅ Three core tools (schema + select)
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📄 License
+
+This project is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+
+## 🙏 Acknowledgments
+
+- Built with [Laravel](https://laravel.com)
+- Powered by [Laravel MCP](https://github.com/laravel/mcp)
+- Inspired by the [Model Context Protocol](https://modelcontextprotocol.io)
+
+---
+
+<p align="center">Made with ❤️ for AI-native development</p>

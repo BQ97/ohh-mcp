@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Mcp\Database\DbConnectionResolver;
 use App\Mcp\Guards\QueryGuard;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\DB;
@@ -17,10 +18,13 @@ class DbSelectQuery extends Tool
     protected string $description = <<<'MARKDOWN'
         Execute a structured SELECT query on a database table (read-only, no raw SQL allowed).
         
-        Required: table (string)
+        Required: project (string), table (string)
         Optional: select (array of strings, default ["*"]), where (array of conditions), order_by (array), limit (integer, max 100, default 20), offset (integer, default 0)
         
-        Example: {"table": "users", "select": ["id", "name"], "where": [["status", "=", "active"]], "limit": 10}
+        IMPORTANT: The 'project' parameter must be resolved from .ai/project.json in the business repository.
+        Never hardcode or guess project identifiers.
+        
+        Example: {"project": "housekeep", "table": "users", "select": ["id", "name"], "where": [["status", "=", "active"]], "limit": 10}
     MARKDOWN;
 
     /**
@@ -29,6 +33,9 @@ class DbSelectQuery extends Tool
     public function schema(JsonSchema $schema): array
     {
         return [
+            'project' => $schema->string()
+                ->description('Project identifier (housekeep, nyw, or esign). REQUIRED: Must be provided.')
+                ->required(),
             'table' => $schema->string()
                 ->description('The name of the table to query')
                 ->required(),
@@ -50,6 +57,27 @@ class DbSelectQuery extends Tool
      */
     public function handle(Request $request): Response
     {
+        // 解析项目并获取数据库连接
+        $project = $request->string('project', '');
+        
+        // 如果 project 为空，返回友好的错误信息
+        if (empty($project)) {
+            $available = implode(', ', array_keys(config('mcp_projects', [])));
+            return Response::json([
+                'error' => 'Missing required parameter',
+                'message' => "The 'project' parameter is required. Available projects: {$available}",
+                'available_projects' => array_keys(config('mcp_projects', [])),
+                'example' => [
+                    'project' => 'housekeep',
+                    'table' => 'users',
+                    'select' => ['id', 'name'],
+                    'limit' => 10
+                ]
+            ]);
+        }
+        
+        $connectionName = DbConnectionResolver::resolve($project);
+        
         // 获取参数
         $input = [
             'table' => $request->string('table'),
@@ -61,10 +89,10 @@ class DbSelectQuery extends Tool
         ];
 
         // 安全验证
-        QueryGuard::validate($input);
+        QueryGuard::validate($input, $connectionName);
 
         // 构建查询
-        $query = DB::table($input['table']);
+        $query = DB::connection($connectionName)->table($input['table']);
 
         // SELECT 字段
         $select = $input['select'];
@@ -110,7 +138,7 @@ class DbSelectQuery extends Tool
         $rows = $query->get()->toArray();
 
         // 获取总数（用于分页）
-        $totalQuery = DB::table($input['table']);
+        $totalQuery = DB::connection($connectionName)->table($input['table']);
         if (!empty($input['where'])) {
             foreach ($input['where'] as $condition) {
                 if (count($condition) === 2) {
@@ -125,6 +153,7 @@ class DbSelectQuery extends Tool
         $result = [
             'rows' => $rows,
             'meta' => [
+                'project' => $project,
                 'table' => $input['table'],
                 'count' => count($rows),
                 'limit' => $limit,

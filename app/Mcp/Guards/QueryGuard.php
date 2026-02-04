@@ -26,21 +26,22 @@ class QueryGuard
      * 验证查询输入
      *
      * @param array $input
+     * @param string|null $connectionName 数据库连接名称
      * @throws InvalidArgumentException
      */
-    public static function validate(array $input): void
+    public static function validate(array $input, ?string $connectionName = null): void
     {
         // 验证表名
-        self::validateTable($input['table'] ?? null);
+        self::validateTable($input['table'] ?? null, $connectionName);
 
         // 验证字段
         if (isset($input['select'])) {
-            self::validateColumns($input['table'], $input['select']);
+            self::validateColumns($input['table'], $input['select'], $connectionName);
         }
 
         // 验证 WHERE 条件
         if (isset($input['where'])) {
-            self::validateWhereConditions($input['table'], $input['where']);
+            self::validateWhereConditions($input['table'], $input['where'], $connectionName);
         }
 
         // 验证 LIMIT
@@ -53,15 +54,18 @@ class QueryGuard
      * 验证表名是否存在
      *
      * @param string|null $table
+     * @param string|null $connectionName
      * @throws InvalidArgumentException
      */
-    private static function validateTable(?string $table): void
+    private static function validateTable(?string $table, ?string $connectionName = null): void
     {
         if (empty($table)) {
             throw new InvalidArgumentException('Table name is required');
         }
 
-        if (!Schema::hasTable($table)) {
+        $schema = $connectionName ? Schema::connection($connectionName) : Schema::connection();
+        
+        if (!$schema->hasTable($table)) {
             throw new InvalidArgumentException("Table '{$table}' does not exist");
         }
     }
@@ -71,15 +75,17 @@ class QueryGuard
      *
      * @param string $table
      * @param array $columns
+     * @param string|null $connectionName
      * @throws InvalidArgumentException
      */
-    private static function validateColumns(string $table, array $columns): void
+    private static function validateColumns(string $table, array $columns, ?string $connectionName = null): void
     {
         if (empty($columns)) {
             throw new InvalidArgumentException('Select columns cannot be empty');
         }
 
-        $tableColumns = Schema::getColumnListing($table);
+        $schema = $connectionName ? Schema::connection($connectionName) : Schema::connection();
+        $tableColumns = $schema->getColumnListing($table);
 
         foreach ($columns as $column) {
             // 允许 * 通配符
@@ -99,15 +105,17 @@ class QueryGuard
      *
      * @param string $table
      * @param array $conditions
+     * @param string|null $connectionName
      * @throws InvalidArgumentException
      */
-    private static function validateWhereConditions(string $table, array $conditions): void
+    private static function validateWhereConditions(string $table, array $conditions, ?string $connectionName = null): void
     {
         if (!is_array($conditions)) {
             throw new InvalidArgumentException('WHERE conditions must be an array');
         }
 
-        $tableColumns = Schema::getColumnListing($table);
+        $schema = $connectionName ? Schema::connection($connectionName) : Schema::connection();
+        $tableColumns = $schema->getColumnListing($table);
 
         foreach ($conditions as $condition) {
             if (!is_array($condition) || count($condition) < 2) {

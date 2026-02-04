@@ -5,33 +5,46 @@
   "tools": [
     {
       "name": "db_schema_tables",
-      "description": "Get all tables in the database with their comments",
+      "description": "Get all tables in the database with their comments. IMPORTANT: The 'project' parameter must be resolved from .ai/project.json in the business repository. Never hardcode or guess project identifiers.",
       "input_schema": {
         "type": "object",
-        "properties": {},
-        "required": []
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier (housekeep, nyw, or esign). REQUIRED: Must be provided."
+          }
+        },
+        "required": ["project"]
       }
     },
     {
       "name": "db_schema_table_detail",
-      "description": "Get detailed schema information for a specific table including columns, indexes, and foreign keys",
+      "description": "Get detailed schema information for a specific table including columns, indexes, and foreign keys. IMPORTANT: The 'project' parameter must be resolved from .ai/project.json in the business repository.",
       "input_schema": {
         "type": "object",
         "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier (housekeep, nyw, or esign). REQUIRED: Must be provided."
+          },
           "table": {
             "type": "string",
             "description": "The name of the table to get details for"
           }
         },
-        "required": ["table"]
+        "required": ["project", "table"]
       }
     },
     {
       "name": "db_select_query",
-      "description": "Execute a structured SELECT query on a database table (read-only, no raw SQL allowed)",
+      "description": "Execute a structured SELECT query on a database table (read-only, no raw SQL allowed). IMPORTANT: The 'project' parameter must be resolved from .ai/project.json in the business repository.",
       "input_schema": {
         "type": "object",
         "properties": {
+          "project": {
+            "type": "string",
+            "description": "Project identifier (housekeep, nyw, or esign). REQUIRED: Must be provided."
+          },
           "table": {
             "type": "string",
             "description": "The name of the table to query"
@@ -74,7 +87,7 @@
             "minimum": 0
           }
         },
-        "required": ["table"]
+        "required": ["project", "table"]
       }
     }
   ],
