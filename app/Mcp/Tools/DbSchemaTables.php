@@ -161,12 +161,14 @@ class DbSchemaTables extends Tool
     {
         try {
             if ($driver === 'mysql') {
+                $database = DB::connection($connectionName)->getDatabaseName();
+
                 $result = DB::connection($connectionName)->selectOne(
                     "SELECT TABLE_COMMENT 
                      FROM information_schema.TABLES 
-                     WHERE TABLE_SCHEMA = DATABASE() 
+                     WHERE TABLE_SCHEMA = ? 
                      AND TABLE_NAME = ?",
-                    [$tableName]
+                    [$database, $tableName]
                 );
 
                 return $result->TABLE_COMMENT ?? null;
@@ -174,9 +176,16 @@ class DbSchemaTables extends Tool
 
             if ($driver === 'pgsql') {
                 $result = DB::connection($connectionName)->selectOne(
-                    "SELECT obj_description(oid) as comment 
-                     FROM pg_class 
-                     WHERE relname = ? AND relkind = 'r'",
+                                        "SELECT pgd.description AS comment
+                                         FROM pg_catalog.pg_class pgc
+                                         JOIN pg_catalog.pg_namespace pgn ON pgn.oid = pgc.relnamespace
+                                         LEFT JOIN pg_catalog.pg_description pgd
+                                                ON pgd.objoid = pgc.oid
+                                                AND pgd.objsubid = 0
+                                         WHERE pgc.relname = ?
+                                             AND pgc.relkind IN ('r', 'p')
+                                             AND pgn.nspname = ANY (current_schemas(false))
+                                         LIMIT 1",
                     [$tableName]
                 );
 

@@ -61,45 +61,44 @@ class DbSelectQuery extends Tool
         try {
             // 解析项目并获取数据库连接
             $project = $request->string('project', '');
-            
+
             // 如果 project 为空，返回友好的错误信息
             if (empty($project)) {
                 $availableProjects = DbConnectionResolver::getAvailableProjects();
                 return ErrorResponse::missingProject($availableProjects);
             }
-            
+
             $connectionName = DbConnectionResolver::resolve($project);
-            
         } catch (\InvalidArgumentException $e) {
             // 处理项目不存在的错误
             $availableProjects = DbConnectionResolver::getAvailableProjects();
-            
+
             if (str_contains($e->getMessage(), 'project_missing')) {
                 return ErrorResponse::missingProject($availableProjects);
             }
-            
+
             if (str_contains($e->getMessage(), 'project_not_found')) {
                 $projectName = str_replace('project_not_found:', '', $e->getMessage());
                 return ErrorResponse::projectNotFound($projectName, $availableProjects);
             }
-            
+
             return ErrorResponse::generic($e->getMessage(), 'Error');
         } catch (\Exception $e) {
             $availableProjects = DbConnectionResolver::getAvailableProjects();
             return ErrorResponse::connectionFailed($request->string('project', 'unknown'), $e->getMessage());
         }
 
-        try {
-            // 获取参数
-            $input = [
-                'table' => $request->string('table'),
-                'select' => $request->array('select', ['*']),
-                'where' => $request->array('where', []),
-                'order_by' => $request->array('order_by', []),
-                'limit' => $request->integer('limit', 20),
-                'offset' => $request->integer('offset', 0),
-            ];
+        // 获取参数
+        $input = [
+            'table' => $request->string('table'),
+            'select' => $request->array('select', ['*']),
+            'where' => $request->array('where', []),
+            'order_by' => $request->array('order_by', []),
+            'limit' => $request->integer('limit', 20),
+            'offset' => $request->integer('offset', 0),
+        ];
 
+        try {
             // 安全验证
             $validationError = QueryGuard::validate($input, $connectionName);
             if ($validationError) {
@@ -201,4 +200,3 @@ class DbSelectQuery extends Tool
         }
     }
 }
-

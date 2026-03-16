@@ -49,37 +49,36 @@ class DbSchemaTableDetail extends Tool
         try {
             // 解析项目并获取数据库连接
             $project = $request->string('project', '');
-            
+
             // 如果 project 为空，返回友好的错误信息
             if (empty($project)) {
                 $availableProjects = DbConnectionResolver::getAvailableProjects();
                 return ErrorResponse::missingProject($availableProjects);
             }
-            
+
             $connectionName = DbConnectionResolver::resolve($project);
-            
         } catch (\InvalidArgumentException $e) {
             // 处理项目不存在的错误
             $availableProjects = DbConnectionResolver::getAvailableProjects();
-            
+
             if (str_contains($e->getMessage(), 'project_missing')) {
                 return ErrorResponse::missingProject($availableProjects);
             }
-            
+
             if (str_contains($e->getMessage(), 'project_not_found')) {
                 $projectName = str_replace('project_not_found:', '', $e->getMessage());
                 return ErrorResponse::projectNotFound($projectName, $availableProjects);
             }
-            
+
             return ErrorResponse::generic($e->getMessage(), 'Error');
         } catch (\Exception $e) {
             $availableProjects = DbConnectionResolver::getAvailableProjects();
             return ErrorResponse::connectionFailed($request->string('project', 'unknown'), $e->getMessage());
         }
 
-        try {
-            $tableName = $request->string('table', '');
+        $tableName = $request->string('table', '');
 
+        try {
             // 验证表是否存在
             $validationError = QueryGuard::validate(['table' => $tableName], $connectionName);
             if ($validationError) {
@@ -118,6 +117,8 @@ class DbSchemaTableDetail extends Tool
         $columns = [];
 
         if ($driver === 'mysql') {
+            $database = DB::connection($connectionName)->getDatabaseName();
+
             $results = DB::connection($connectionName)->select(
                 "SELECT 
                     COLUMN_NAME as name,
@@ -128,10 +129,10 @@ class DbSchemaTableDetail extends Tool
                     EXTRA as extra,
                     COLUMN_COMMENT as comment
                 FROM information_schema.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
+                WHERE TABLE_SCHEMA = ?
                 AND TABLE_NAME = ?
                 ORDER BY ORDINAL_POSITION",
-                [$tableName]
+                [$database, $tableName]
             );
 
             foreach ($results as $column) {
@@ -148,12 +149,27 @@ class DbSchemaTableDetail extends Tool
         } elseif ($driver === 'pgsql') {
             $results = DB::connection($connectionName)->select(
                 "SELECT 
-                    column_name as name,
-                    data_type as type,
-                    is_nullable as nullable,
-                    column_default as default_value
-                FROM information_schema.columns
-                WHERE table_name = ?
+                    c.column_name as name,
+                    c.data_type as type,
+                    c.is_nullable as nullable,
+                    c.column_default as default_value,
+                    pgd.description as comment
+                FROM information_schema.columns c
+                JOIN pg_catalog.pg_class pgc
+                    ON pgc.relname = c.table_name
+                JOIN pg_catalog.pg_namespace pgn
+                    ON pgn.oid = pgc.relnamespace
+                    AND pgn.nspname = c.table_schema
+                LEFT JOIN pg_catalog.pg_attribute pga
+                    ON pga.attrelid = pgc.oid
+                    AND pga.attname = c.column_name
+                    AND pga.attnum > 0
+                    AND NOT pga.attisdropped
+                LEFT JOIN pg_catalog.pg_description pgd
+                    ON pgd.objoid = pgc.oid
+                    AND pgd.objsubid = pga.attnum
+                WHERE c.table_schema = 'public'
+                AND c.table_name = ?
                 ORDER BY ordinal_position",
                 [$tableName]
             );
@@ -166,7 +182,7 @@ class DbSchemaTableDetail extends Tool
                     'default' => $column->default_value,
                     'key' => '',
                     'extra' => '',
-                    'comment' => null,
+                    'comment' => $column->comment,
                 ];
             }
         } elseif ($driver === 'sqlite') {
@@ -271,6 +287,8 @@ class DbSchemaTableDetail extends Tool
 
         try {
             if ($driver === 'mysql') {
+                $database = DB::connection($connectionName)->getDatabaseName();
+
                 $results = DB::connection($connectionName)->select(
                     "SELECT
                         CONSTRAINT_NAME as name,
@@ -278,10 +296,10 @@ class DbSchemaTableDetail extends Tool
                         REFERENCED_TABLE_NAME as referenced_table,
                         REFERENCED_COLUMN_NAME as referenced_column
                     FROM information_schema.KEY_COLUMN_USAGE
-                    WHERE TABLE_SCHEMA = DATABASE()
+                    WHERE TABLE_SCHEMA = ?
                     AND TABLE_NAME = ?
                     AND REFERENCED_TABLE_NAME IS NOT NULL",
-                    [$tableName]
+                    [$database, $tableName]
                 );
 
                 foreach ($results as $fk) {
@@ -336,4 +354,3 @@ class DbSchemaTableDetail extends Tool
         return $foreignKeys;
     }
 }
-
